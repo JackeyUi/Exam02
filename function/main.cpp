@@ -29,8 +29,9 @@ DigitalOut led3(LED3);
 
 
 double theta;
+int cnt;
 int GV = 0;
-int dGU = 1, dTA = 0;
+int dGU = 1, dTA = 0, dAC = 0;
 char src[10];
 int xx = 0;
 int x = 0;
@@ -38,14 +39,16 @@ int n_src = 30;
 int y_u;
 int ang_cnt = 0;
 int ang_tri = 0;
+int g_tri = 0;
+int f = 0;
 int16_t pXYZ[3] = {0};
 int16_t sXYZ[3] = {0};
 int16_t aXYZ[3] = {0};
-
+int16_t fXYZ[3] = {0};
 EventQueue qGUI(32 * EVENTS_EVENT_SIZE);
 Thread tGUI(osPriorityNormal, 4 * OS_STACK_SIZE);
 Thread tANG(osPriorityNormal, 4 * OS_STACK_SIZE);
-Thread bt;
+Thread tRecord(osPriorityNormal, 4 * OS_STACK_SIZE);
 
 // GLOBAL VARIABLES
 constexpr int kTensorArenaSize = 20 * 1024;
@@ -61,10 +64,14 @@ const char* topic = "Mbed";
 
 Thread mqtt_thread(osPriorityHigh);
 EventQueue mqtt_queue;
+int fearture[100][10] = {0};
 
-void doGUI(Arguments *in, Reply *out);
+
+void ACCR(Arguments *in, Reply *out);
+//void print(Arguments *in, Reply *out);
 void doANG(Arguments *in, Reply *out);
-RPCFunction rpcGUI(&doGUI, "doGUI");
+RPCFunction rpcGUI(&ACCR, "ACCR");
+//RPCFunction rpcF(&print, "print");
 RPCFunction rpcANG(&doANG, "doANG");
 BufferedSerial pc(USBTX, USBRX);
 
@@ -72,16 +79,32 @@ BufferedSerial pc(USBTX, USBRX);
 void flip1() {
     dGU = !dGU;
 }
+
 void flip2() {
     dTA = !dTA;
+}
+void flip3() {
+    dAC = !dAC;
 }
 void ang_info() {
    if(!ang_tri)  {
      ang_tri = 1;
-     sprintf(src, "%lf", theta);
+     //sprintf(src, "%lf", theta);
    }
 }
-
+void gestrue_info() {
+   if(!g_tri)  {
+     g_tri = 1;
+     //sprintf(src, "%lf", theta);
+   }
+}
+void record() {
+   BSP_ACCELERO_AccGetXYZ(fXYZ);
+   if (fXYZ[1] > 800 || fXYZ[1] < -800) f = 2;
+   else if (fXYZ[2] > 950) f = 1;
+   else f = 0;
+   ThisThread::sleep_for(50ms);
+}
 
 int PredictGesture(float* output) {
   // How many times the most recent gesture has been matched in a row
@@ -220,11 +243,11 @@ int main() {
     
    while(1) {
      btn2.rise(mqtt_queue.event(&publish_message, &client));
-     while(ang_tri) {
+     while(g_tri) {
        mqtt_queue.call(&publish_message, &client);
-       ang_tri = 0;
+       g_tri = 0;
      }
-     if(!dTA){
+     if(!dAC){
       memset(buf, 0, 256);
       for (int i = 0; ; i++) {
           char recv = fgetc(devin);
@@ -297,7 +320,7 @@ static tflite::MicroOpResolver<6> micro_op_resolver;
   error_reporter->Report("Set up successful...\n\r");
   led1 = 1; 
  
- while (dGU) {
+ while (dAC) {
 
     // Attempt to read new data from the accelerometer
     got_data = ReadAccelerometer(error_reporter, model_input->data.f,
@@ -324,7 +347,7 @@ static tflite::MicroOpResolver<6> micro_op_resolver;
     should_clear_buffer = gesture_index < label_num;
     // Produce an output
     if (gesture_index < label_num) {
-      strcpy(src,config.output_message[gesture_index]);
+      sprintf(src,"%s %d",config.output_message[gesture_index], cnt);
       //error_reporter->Report(config.output_message[gesture_index]);
       printf("%s\n\r", src);
       uLCD.locate(3,y_u);
@@ -334,7 +357,10 @@ static tflite::MicroOpResolver<6> micro_op_resolver;
       y_u = n_src/15 - 1;
       uLCD.locate(3,y_u);
       uLCD.printf("<-");
+      gestrue_info();
+      cnt++;
     }
+    //if(cnt == 3) 
   }
    led1 = 0;
    printf("stopping GUI mode\n");
@@ -384,14 +410,15 @@ void ANGM() {
   printf("The angle detaction is over, back to the RPC loop\n");
 }
 
-void doGUI(Arguments *in, Reply *out) {
+void ACCR(Arguments *in, Reply *out) {
     x = in->getArg<int>();
     if(x) {
-      //flip1();
+      cnt = 1;
+      flip3();
       tGUI.start(GUIM);
     }
     else 
-    flip1();
+    flip3();
 }
 
 void doANG(Arguments *in, Reply *out) {
