@@ -31,7 +31,7 @@ DigitalOut led3(LED3);
 double theta;
 int cnt;
 int GV = 0;
-int dGU = 1, dTA = 0, dAC = 0;
+int dGU = 1, dTA = 0, dAC = 0, dR = 1;
 char src[10];
 int xx = 0;
 int x = 0;
@@ -41,6 +41,11 @@ int ang_cnt = 0;
 int ang_tri = 0;
 int g_tri = 0;
 int f = 0;
+
+int index_n;
+int index_e;
+int lim[5];
+
 int16_t pXYZ[3] = {0};
 int16_t sXYZ[3] = {0};
 int16_t aXYZ[3] = {0};
@@ -48,10 +53,10 @@ int16_t fXYZ[3] = {0};
 EventQueue qGUI(32 * EVENTS_EVENT_SIZE);
 Thread tGUI(osPriorityNormal, 4 * OS_STACK_SIZE);
 Thread tANG(osPriorityNormal, 4 * OS_STACK_SIZE);
-Thread tRecord(osPriorityNormal, 4 * OS_STACK_SIZE);
+Thread tRecord(osPriorityNormal);
 
 // GLOBAL VARIABLES
-constexpr int kTensorArenaSize = 20 * 1024;
+constexpr int kTensorArenaSize = 30 * 1024;
 uint8_t tensor_arena[kTensorArenaSize];
 WiFiInterface *wifi;
 InterruptIn btn2(USER_BUTTON);
@@ -64,14 +69,14 @@ const char* topic = "Mbed";
 
 Thread mqtt_thread(osPriorityHigh);
 EventQueue mqtt_queue;
-int fearture[100][10] = {0};
+int fearture[100][5] = {0};
 
 
 void ACCR(Arguments *in, Reply *out);
-//void print(Arguments *in, Reply *out);
+void print(Arguments *in, Reply *out);
 void doANG(Arguments *in, Reply *out);
 RPCFunction rpcGUI(&ACCR, "ACCR");
-//RPCFunction rpcF(&print, "print");
+RPCFunction rpcF(&print, "print");
 RPCFunction rpcANG(&doANG, "doANG");
 BufferedSerial pc(USBTX, USBRX);
 
@@ -99,11 +104,16 @@ void gestrue_info() {
    }
 }
 void record() {
+  while(dR) {
    BSP_ACCELERO_AccGetXYZ(fXYZ);
    if (fXYZ[1] > 800 || fXYZ[1] < -800) f = 2;
    else if (fXYZ[2] > 950) f = 1;
    else f = 0;
-   ThisThread::sleep_for(50ms);
+   if(index_n < 100 && index_e < 5);
+    fearture[index_n++][index_e] = f;
+   if(index_e == 5) break;
+   ThisThread::sleep_for(500ms);
+  }
 }
 
 int PredictGesture(float* output) {
@@ -269,7 +279,7 @@ int main() {
 }
 
 void GUIM() {
-  uLCD.printf("30\n 45\n 60");
+  //uLCD.printf("30\n 45\n 60");
   dGU = 1;
   // Whether we should clear the buffer next time we fetch data
   bool should_clear_buffer = false;
@@ -319,7 +329,7 @@ static tflite::MicroOpResolver<6> micro_op_resolver;
 
   error_reporter->Report("Set up successful...\n\r");
   led1 = 1; 
- 
+  tRecord.start(record);
  while (dAC) {
 
     // Attempt to read new data from the accelerometer
@@ -350,20 +360,28 @@ static tflite::MicroOpResolver<6> micro_op_resolver;
       sprintf(src,"%s %d",config.output_message[gesture_index], cnt);
       //error_reporter->Report(config.output_message[gesture_index]);
       printf("%s\n\r", src);
-      uLCD.locate(3,y_u);
-      uLCD.printf("   ");
-      //printf("%d\n\r", dGU);
-      n_src = atoi(src);
-      y_u = n_src/15 - 1;
-      uLCD.locate(3,y_u);
-      uLCD.printf("<-");
+      uLCD.locate(1,1);
+      uLCD.printf("           ");
+      uLCD.locate(1,1);
+      uLCD.printf("%s", src);
+      for(int i = 0; i < index_n; i++) {
+        printf("%d", fearture[i][index_e]);
+      }
+      printf("\n%d\n", index_e);
       gestrue_info();
       cnt++;
+      lim[index_e] = index_n;
+      index_n = 0;
+      index_e++;
     }
-    //if(cnt == 3) 
+    if(index_e == 5) { 
+        break;    
+    }
+     
   }
+   dAC = 0;
    led1 = 0;
-   printf("stopping GUI mode\n");
+   //printf("stopping ACC mode\n");
 }
 
 void ANGM() {
@@ -413,12 +431,14 @@ void ANGM() {
 void ACCR(Arguments *in, Reply *out) {
     x = in->getArg<int>();
     if(x) {
+      index_n = 0;
+      index_e = 0;
       cnt = 1;
       flip3();
       tGUI.start(GUIM);
     }
-    else 
-    flip3();
+    //else 
+    //flip3();
 }
 
 void doANG(Arguments *in, Reply *out) {
@@ -427,4 +447,13 @@ void doANG(Arguments *in, Reply *out) {
       flip2();
       tANG.start(ANGM);
     }
+}
+
+void print(Arguments *in, Reply *out) {
+  for(int i = 0; i < 5; i++) {
+    for(int j = 0; j < lim[i]; j++) {
+      printf("%d",fearture[j][i]);
+    }
+    printf("\n");
+  }
 }
